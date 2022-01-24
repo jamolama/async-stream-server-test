@@ -6,6 +6,8 @@ import asyncio
 import requests
 import pathlib
 from urllib.parse import urlparse, parse_qs
+import httpx
+import aiofiles
 
 # goal: over the course of 10 minutes, generate 100 binary files of random sizes ranging from 1kb to 1Mb at random time intervals ranging from 1ms to 1s, encoded int16.
 
@@ -43,6 +45,7 @@ class DataGenerator:
 class ServerSender:
     def __init__(self):
         self.task_count = 0
+        self.client = httpx.AsyncClient()
 
     def queue_size(self):
         # don't include calling task in queue size
@@ -56,11 +59,11 @@ class ServerSender:
         data = DataGenerator.generate(bit_count=data_size)
         start = time.time()
         # send data to receiver server
-        response = requests.post(f"http://localhost:{port_receiver}", params={"task_id":task_id}, data=data)
+        response = await self.client.post(f"http://localhost:{port_receiver}", params={"task_id":task_id}, data=data)
         # write file to disk
         file_name = file_path_sender.joinpath(f"{task_id}.bin")
-        with open(file_name, "wb") as f:
-            f.write(data)
+        async with aiofiles.open(file_name, "wb") as f:
+            await f.write(data)
 
         if test_delay_queue:
             await asyncio.sleep(1)
@@ -78,6 +81,7 @@ class ServerSender:
             print(f"SENDER: created task {task_id}, queue size: {self.queue_size()}, tasks completed: {self.completed_count()}")
 
         await asyncio.gather(*asyncio.all_tasks() - {asyncio.current_task()})
+        await self.client.aclose()
         print(f"SENDER: generated and sent {self.task_count} files")
 
 class ServerReceiver(BaseHTTPRequestHandler):
